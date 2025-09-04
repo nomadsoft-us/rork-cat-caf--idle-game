@@ -7,11 +7,11 @@ import {
   CAT_NAMES, 
   CAT_COLORS,
   CUSTOMER_TYPES,
-  RANDOM_EVENTS,
   COFFEE_MENU,
   UPGRADES,
   ACHIEVEMENTS,
 } from "@/constants/gameData";
+import { useEventManagement } from "@/providers/EventManagementProvider";
 
 const TICK_RATE = 100; // ms
 const SAVE_INTERVAL = 15000; // 15 seconds
@@ -91,6 +91,7 @@ export const [GameProvider, useGame] = createContextHook(() => {
   const [gameState, setGameState] = useState<GameState>(initialGameState);
   const tickInterval = useRef<any>(null);
   const saveInterval = useRef<any>(null);
+  const { processEvents, getEventMultiplier } = useEventManagement();
 
   // Load game state
   useEffect(() => {
@@ -231,23 +232,8 @@ export const [GameProvider, useGame] = createContextHook(() => {
       newState.accumulatedRevenue += revenue;
       newState.statistics.totalMoneyEarned += revenue;
 
-      // Random events
-      if (Math.random() < 0.001) {
-        const event = triggerRandomEvent();
-        if (event) {
-          newState.events.push(event);
-          applyEventEffects(newState, event);
-        }
-      }
-      
-      // Process active events
-      newState.events = newState.events.filter(event => {
-        const isActive = Date.now() - event.startTime < event.duration * 1000;
-        if (!isActive) {
-          removeEventEffects(newState, event);
-        }
-        return isActive;
-      });
+      // Process events
+      processEvents(newState, deltaTime);
 
       return newState;
     });
@@ -687,54 +673,12 @@ export const [GameProvider, useGame] = createContextHook(() => {
     const facilityBonus = Object.values(state.upgrades.facilities).reduce((sum, level) => sum + level * 0.1, 0);
     
     // Event multipliers
-    let eventMultiplier = 1;
-    state.events.forEach(event => {
-      if (event.type === 'catTalentShow') eventMultiplier *= 3;
-      if (event.type === 'viralVideo') eventMultiplier *= 2;
-      if (event.type === 'spilledCoffee') eventMultiplier *= 0.5;
-    });
+    const eventMultiplier = getEventMultiplier(state.events);
     
     return baseRevenue * (1 + customerMultiplier + coffeeBonus + facilityBonus) * catHappinessAvg * reputationMultiplier * eventMultiplier;
   };
 
-  const triggerRandomEvent = (): Event | null => {
-    const events = Object.entries(RANDOM_EVENTS);
-    const event = events[Math.floor(Math.random() * events.length)];
-    
-    if (Math.random() < event[1].probability) {
-      return {
-        id: Date.now().toString(),
-        type: event[0],
-        message: event[1].message,
-        duration: event[1].duration,
-        startTime: Date.now(),
-      };
-    }
-    
-    return null;
-  };
-  
-  const applyEventEffects = (state: GameState, event: Event) => {
-    const eventData = RANDOM_EVENTS[event.type as keyof typeof RANDOM_EVENTS];
-    if (!eventData) return;
-    
-    // Apply event effects based on type
-    switch (event.type) {
-      case 'viralVideo':
-        state.reputation = Math.min(100, state.reputation + 10);
-        break;
-      case 'catTalentShow':
-        // Tip multiplier is handled in revenue calculation
-        break;
-      case 'spilledCoffee':
-        state.money = Math.max(0, state.money - 50);
-        break;
-    }
-  };
-  
-  const removeEventEffects = (state: GameState, event: Event) => {
-    // Clean up any temporary effects when event ends
-  };
+
   
   const calculateOfflineProgress = (lastSaveTime: number, currentTime: number, cats: Cat[], upgrades: any) => {
     const hoursAway = (currentTime - lastSaveTime) / (1000 * 60 * 60);
